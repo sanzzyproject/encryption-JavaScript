@@ -3,39 +3,65 @@ import * as cheerio from 'cheerio';
 import vm from 'vm';
 
 export default async function handler(req, res) {
-  // CORS Handling
+  // Atur CORS agar frontend bisa mengakses API
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, message: 'Method Not Allowed' });
+    return res.status(405).json({ success: false, message: 'Gunakan method POST' });
   }
 
   const { code } = req.body;
   
   if (!code) {
-    return res.status(400).json({ success: false, message: 'Input code is required' });
+    return res.status(400).json({ success: false, message: 'Kode tidak boleh kosong' });
   }
 
   try {
-    // Simulasi request sesuai script asli
-    await axios.get('https://codebeautify.org/javascript-obfuscator', {
-      headers: { 
+    // === KODE SCRAPE PERSIS SESUAI PERMINTAAN ===
+    const pageResponse = await axios.get('https://codebeautify.org/javascript-obfuscator', {
+      headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
       }
+    });
+    
+    const $ = cheerio.load(pageResponse.data);
+    
+    const jsToolsScript = await axios.get('https://codebeautify.org/dist/9.6/js/b/b-js-tools.min.js', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    
+    const aceScript = await axios.get('https://cdnjs.cloudflare.com/ajax/libs/ace/1.36.2/ace.js', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    
+    const beautifyScript = await axios.get('https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.14.9/beautify.min.js', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
 
     const sandbox = {
       window: {},
       document: {
-        getElementById: function() { return { value: '', innerText: '', innerHTML: '' }; }
+        getElementById: function(id) {
+          return { value: '', innerText: '', innerHTML: '' };
+        }
+      },
+      ace: {
+        edit: function(id) {
+          return {
+            getValue: function() { return code; },
+            setValue: function(value) { sandbox.obfuscatedResult = value; },
+            getSession: function() { return { setMode: function() {} }; }
+          };
+        }
       },
       console: console,
       obfuscatedResult: '',
@@ -101,10 +127,15 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ 
       success: true, 
+      sourceUrl: "https://codebeautify.org/javascript-obfuscator",
       result: sandbox.obfuscatedResult 
     });
 
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    // Menangkap error jika scrape gagal
+    return res.status(500).json({ 
+      success: false, 
+      message: `Scraping failed: ${error.message}` 
+    });
   }
 }
